@@ -1,0 +1,71 @@
+# https://taskfile.dev — apps/volt: the family tool (build/release/ci/new).
+# Same task names as every other module so `task volt:test` etc. work from
+# the repo root.
+version: "3"
+
+tasks:
+  test:
+    desc: Run tests
+    cmds: [go test ./...]
+  test:race:
+    desc: Run tests with the race detector
+    cmds: [go test -race ./...]
+  test:cover:
+    desc: Coverage summary
+    cmds:
+      - go test -coverprofile=cover.out ./...
+      - go tool cover -func=cover.out | tail -1
+  vet:
+    desc: go vet
+    cmds: [go vet ./...]
+  install:
+    desc: 'Build the DEV volt from this working tree and install it to $GOPATH/bin/volt'
+    vars:
+      # A dev install must be distinguishable from a release at a glance:
+      # version carries the commit and a -dev marker, never a bare semver.
+      SHA: { sh: git rev-parse --short HEAD }
+      DIRTY: { sh: 'test -z "$(git status --porcelain)" && echo "" || echo ".dirty"' }
+    cmds:
+      - >-
+        go build -trimpath
+        -ldflags "-X main.voltVersion=v0.0.0-dev.{{.SHA}}{{.DIRTY}} -X main.voltCommit={{.SHA}}"
+        -o "$(go env GOPATH)/bin/volt" .
+      - '"$(go env GOPATH)/bin/volt" --version'
+
+  image:
+    desc: Build the volt CI container image (ghcr.io/khanakia/volt:dev) — FG-D3
+    dir: ../..
+    cmds:
+      - docker build -t ghcr.io/khanakia/volt:dev .
+
+  smoke:
+    desc: Build the tool, use it to build apps/demo, verify an artifact end-to-end
+    vars:
+      # Host platform, derived — never hardcoded, so the smoke test runs on
+      # any machine (spec: verify the artifact, not the exit code).
+      GOOS: { sh: go env GOOS }
+      GOARCH: { sh: go env GOARCH }
+      SMOKE_DIR: /tmp/volt-smoke
+      SMOKE_VER: v0.0.0-smoke
+    cmds:
+      - rm -rf {{.SMOKE_DIR}}
+      - go build -o {{.SMOKE_DIR}}/volt-tool .
+      # --native-only keeps the smoke fast (one platform, not five); the full
+      # matrix is exercised by the gobuild unit tests.
+      # apps/demo releases under its directory name 'demo' — 'volt' is owned by
+      # THIS module (see ../demo/.volt.yml).
+      - '{{.SMOKE_DIR}}/volt-tool build ../demo --version {{.SMOKE_VER}} --dist {{.SMOKE_DIR}}/dist --native-only'
+      - cd {{.SMOKE_DIR}}/dist && shasum -a 256 -c checksums.txt
+      - cd {{.SMOKE_DIR}}/dist && tar xzf demo_{{.SMOKE_VER}}_{{.GOOS}}_{{.GOARCH}}.tar.gz
+      # The extracted binary must report the stamped version — the whole point
+      # of the pipeline. grep -q: fail loudly if the stamp did not land.
+      - '{{.SMOKE_DIR}}/dist/demo version --json | grep -q {{.SMOKE_VER}}'
+      - rm -rf {{.SMOKE_DIR}}
+      - echo "smoke OK — built, checksummed, extracted, version verified"
+
+  ci:
+    desc: Full gate for this module
+    cmds:
+      - task: vet
+      - task: test:race
+      - task: smoke

@@ -1,0 +1,10 @@
+go 1.26.4
+
+use (
+	./appdir
+	./apps/demo
+	./apps/volt
+	./output
+	./skillcmd
+	./versioncmd
+)

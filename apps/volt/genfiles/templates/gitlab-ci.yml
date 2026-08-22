@@ -1,0 +1,24 @@
+# ci: every push and MR — the volt gate (fmt, vet, lint, race tests).
+# release: MANUAL ONLY by decision (ADR-R14): pushing a tag releases
+# nothing. Run the pipeline by hand (CI/CD → Run pipeline) with TAG set to
+# an existing tag to (re)publish it. Logic lives in the volt binary — this
+# file stays a thin shell on every forge; the image is published from
+# voltkit's own releases.
+image: ghcr.io/khanakia/volt:latest
+
+ci:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - volt ci
+
+release:
+  rules:
+    # Web-triggered runs only, and only with TAG provided: the manual-only
+    # rule expressed as pipeline conditions.
+    - if: '$CI_PIPELINE_SOURCE == "web" && $TAG'
+  # Never two releases at once; cancelling mid-publish can strand a pushed
+  # tag with no assets, and that tag is permanent.
+  resource_group: release
+  script:
+    - volt release --from-tag "$TAG"

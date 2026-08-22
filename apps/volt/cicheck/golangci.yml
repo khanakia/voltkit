@@ -1,0 +1,13 @@
+# volt's embedded golangci-lint config — the fleet's lint baseline.
+# Applied by `volt ci` ONLY when the repo has no .golangci config of its own;
+# a repo's own config always wins (it may legitimately need carve-outs for
+# generated code).
+version: "2"
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused

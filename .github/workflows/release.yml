@@ -1,0 +1,25 @@
+# Hand-written for the same reason as ci.yml (workspace root, no go.mod).
+name: release
+# Manual-only by decision (2026-08-22): pushing a tag does NOT release.
+# Releases happen either from a laptop (`volt release <dir> <ver>`) or from
+# here via Run workflow with an existing tag. Note a tag pushed by
+# `GITHUB_TOKEN` could never trigger this anyway (loop prevention) — manual
+# dispatch makes the behaviour uniform instead of push-source-dependent.
+on:
+  workflow_dispatch:
+    inputs:
+      tag: { description: "Existing tag to (re)publish", required: true, type: string }
+permissions: { contents: write, packages: write, id-token: write }
+# cancel-in-progress MUST stay false: cancelling mid-publish can leave a
+# pushed tag with no uploaded assets, and that tag is permanent.
+concurrency: { group: "release-${{ github.repository }}", cancel-in-progress: false }
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, ref: "${{ inputs.tag }}" }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: apps/volt/go.mod }
+      - uses: khanakia/volt-action@v1
+        with: { args: "release --from-tag ${{ inputs.tag }}" }

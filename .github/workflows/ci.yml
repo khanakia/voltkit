@@ -1,0 +1,15 @@
+# Hand-written (not `volt gen`): voltkit's root is a go.work workspace with no
+# root go.mod, so the generated single-module stub does not fit. This is the
+# one repo in the fleet with that excuse.
+name: ci
+on: [push, pull_request]
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: apps/volt/go.mod }
+      - uses: khanakia/volt-action@v1
+        with: { args: "ci --all" }

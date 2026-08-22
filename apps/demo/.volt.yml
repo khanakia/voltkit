@@ -1,0 +1,5 @@
+# The reference binary releases under its directory name ("demo") so that the
+# family tool at apps/volt uniquely owns the release name "volt" — two
+# claimants would make every volt/vX.Y.Z tag a hard ambiguity error.
+# Local builds (root Taskfile) also produce ./bin/demo — one identity
+# everywhere.

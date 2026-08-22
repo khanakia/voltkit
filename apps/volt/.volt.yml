@@ -1,0 +1,13 @@
+# apps/volt — the family tool's own release config.
+binary: volt
+extra_files: [README.md]
+ldflags:
+  vars:
+    # volt does not import ubgo/buildinfo (ADR-R08 — no kit imports), so it
+    # stamps its own main-package symbols instead of the default map.
+    main.voltVersion: "{{.Version}}"
+    main.voltCommit: "{{.ShortCommit}}"
+brew:
+  tap: khanakia/homebrew-tap
+  description: "Build, release and ship Go CLIs and libraries — any repo layout, one command"
+  license: MIT

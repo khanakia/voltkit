@@ -1,0 +1,23 @@
+# https://taskfile.dev — skillcmd: the `skills` subcommand kit module.
+version: "3"
+
+tasks:
+  test:
+    desc: Run tests
+    cmds: [go test ./...]
+  test:race:
+    desc: Run tests with the race detector
+    cmds: [go test -race ./...]
+  test:cover:
+    desc: Coverage summary
+    cmds:
+      - go test -coverprofile=cover.out ./...
+      - go tool cover -func=cover.out | tail -1
+  vet:
+    desc: go vet
+    cmds: [go vet ./...]
+  ci:
+    desc: Full gate for this module
+    cmds:
+      - task: vet
+      - task: test:race

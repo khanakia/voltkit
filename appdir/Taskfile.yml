@@ -1,0 +1,93 @@
+# https://taskfile.dev
+#
+# Tasks for the appdir module. Run them from this directory, or from the repo
+# root as `task appdir:<task>` — the root Taskfile includes this file.
+#
+# Every module carries the same task names on purpose: `task test` means the
+# same thing everywhere, so moving between modules costs no re-learning.
+
+version: "3"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: Run tests with the race detector
+    cmds:
+      - go test -race ./...
+
+  test:cover:
+    desc: Report statement coverage
+    cmds:
+      - go test -coverprofile=cover.out ./...
+      - go tool cover -func=cover.out | tail -1
+
+  test:cover:html:
+    desc: Open the coverage report in a browser
+    deps: [test:cover]
+    cmds:
+      - go tool cover -html=cover.out
+
+  test:uncovered:
+    desc: List functions below 100% coverage
+    cmds:
+      - go test -coverprofile=cover.out ./... > /dev/null
+      - 'go tool cover -func=cover.out | grep -v "100.0%" || echo "everything is covered"'
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  lint:
+    desc: Run golangci-lint when it is installed
+    cmds:
+      - 'which golangci-lint > /dev/null && golangci-lint run ./... || echo "golangci-lint not installed; skipping"'
+
+  fmt:
+    desc: Format the source
+    cmds:
+      - gofmt -w .
+
+  fmt:check:
+    desc: Fail when the source is unformatted
+    cmds:
+      - |
+        out=$(gofmt -l .)
+        if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+
+  tidy:
+    desc: Tidy go.mod and go.sum
+    cmds:
+      - go mod tidy
+
+  doc:
+    desc: Print the package's exported API
+    cmds:
+      - go doc -all .
+
+  deps:
+    desc: Show this module's third-party dependencies
+    cmds:
+      - 'go list -deps ./... | grep "\." | grep -v khanakia/voltkit | sort -u || echo "none — stdlib only"'
+
+  ci:
+    desc: The full gate for this module — format, vet, race tests
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: test:race
+
+  clean:
+    desc: Remove coverage artifacts
+    cmds:
+      - rm -f cover.out cover.html

@@ -1,0 +1,22 @@
+# BEGIN repolink (managed — do not edit)
+/CLAUDE.md
+/docsi
+# END repolink
+
+# --- build output ---
+/bin/
+/dist/
+/tmp/
+# `go build` inside a module dir drops a binary named after that dir
+apps/cli/cli
+
+# --- local state ---
+*.db
+*.db-wal
+*.db-shm
+.env
+coverage.out
+
+# --- os / editor ---
+.DS_Store
+cover.out

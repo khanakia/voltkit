@@ -1,0 +1,149 @@
+# https://taskfile.dev
+#
+# NOTE ON PATHS: the workspace root has no go.mod, so `go build ./...` from here
+# fails with "directory prefix . does not contain modules listed in go.work".
+# Every task therefore iterates the modules explicitly. Add a new module to
+# MODULES below and every task picks it up.
+
+version: "3"
+
+# Each module carries its own Taskfile with the same task names, reachable from
+# here as `task <module>:<task>` — e.g. `task volt:test`, `task appdir:ci`.
+# The repo-wide tasks below iterate every module instead, so `task test` at the
+# root still covers everything.
+# `dir:` is required — without it an included task runs from THIS directory, so
+# every `go` command would miss the module it was meant to act on.
+includes:
+  output: { taskfile: ./output, dir: ./output }
+  appdir: { taskfile: ./appdir, dir: ./appdir }
+  versioncmd: { taskfile: ./versioncmd, dir: ./versioncmd }
+  demo: { taskfile: ./apps/demo, dir: ./apps/demo }
+  volt: { taskfile: ./apps/volt, dir: ./apps/volt }
+  skillcmd: { taskfile: ./skillcmd, dir: ./skillcmd }
+
+vars:
+  BIN: demo
+  BIN_DIR: "{{.ROOT_DIR}}/bin"
+  CLI_PKG: ./apps/demo
+  # Every Go module in the repo, dependency-first so a failure surfaces at its
+  # source. The repo root is NOT a module — it holds only the workspace, this
+  # file, and docs. Each package below carries its own go.mod and its own tag
+  # stream; add a new one here and every task picks it up.
+  MODULES: output appdir versioncmd skillcmd apps/demo apps/volt
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Build the binary with version stamping (CGO off for cross-compilation)
+    vars:
+      VERSION:
+        sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+      COMMIT:
+        sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
+      BUILT:
+        sh: date -u +%Y-%m-%dT%H:%M:%SZ
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      # -X targets the buildinfo package path, not main, so these flags stay
+      # identical no matter what a scaffolded project renames itself to.
+      - >-
+        CGO_ENABLED=0 go build -trimpath
+        -ldflags="-s -w -buildid=
+        -X github.com/ubgo/buildinfo.Version={{.VERSION}}
+        -X github.com/ubgo/buildinfo.Commit={{.COMMIT}}
+        -X github.com/ubgo/buildinfo.BuildTime={{.BUILT}}"
+        -o {{.BIN_DIR}}/{{.BIN}} {{.CLI_PKG}}
+      - echo "built {{.BIN_DIR}}/{{.BIN}} ({{.VERSION}})"
+
+  build:plain:
+    desc: Build with no version stamping (reproduces what a user's `go build` sees)
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - CGO_ENABLED=0 go build -o {{.BIN_DIR}}/{{.BIN}} {{.CLI_PKG}}
+
+  dev:
+    desc: 'Run straight from source, no binary: task dev -- version --json'
+    cmds:
+      # No version stamping and no bin/ artifact — this is the edit-run loop.
+      # `version` therefore reports source=unknown here, which is correct: a
+      # `go run` build genuinely has no release provenance.
+      - go run {{.CLI_PKG}} {{.CLI_ARGS}}
+
+  run:
+    desc: 'Build (stamped) and run the CLI: task run -- version --json'
+    deps: [build]
+    cmds:
+      - "{{.BIN_DIR}}/{{.BIN}} {{.CLI_ARGS}}"
+
+  # `install` used to copy the DEMO reference binary to $GOPATH/bin/volt —
+  # which now collides with the real volt tool. Installing the demo binary
+  # system-wide has no use case; installing the dev tool does.
+  install:
+    desc: Install the DEV volt tool from apps/volt into $GOPATH/bin (alias of volt:install)
+    cmds:
+      - task: volt:install
+
+  test:
+    desc: Run tests in every module
+    cmds:
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go test ./...)
+
+  test:race:
+    desc: Run tests with the race detector
+    cmds:
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go test -race ./...)
+
+  test:cover:
+    desc: Run tests with a coverage summary
+    cmds:
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go test -coverprofile=cover.out ./... && go tool cover -func=cover.out | tail -1)
+
+  vet:
+    desc: Run go vet in every module
+    cmds:
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go vet ./...)
+
+  fmt:
+    desc: Format all Go source (skips generated code)
+    cmds:
+      - gofmt -w $(find . -name '*.go' -not -path './bin/*' -not -path '*/gen/*')
+
+  fmt:check:
+    desc: Fail if any Go source is unformatted
+    cmds:
+      - |
+        out=$(gofmt -l $(find . -name '*.go' -not -path './bin/*' -not -path '*/gen/*'))
+        if [ -n "$out" ]; then echo "gofmt needed on:"; echo "$out"; exit 1; fi
+
+  tidy:
+    desc: Tidy go.mod in every module, then re-sync the workspace
+    cmds:
+      - for: { var: MODULES }
+        cmd: (cd {{.ITEM}} && go mod tidy)
+      - go work sync
+
+  ci:
+    desc: Full local gate — format, vet, race tests, build
+    cmds:
+      - task: fmt:check
+      - task: vet
+      - task: test:race
+      - task: build
+      # End-to-end: the volt tool builds apps/demo, checksums verify, and the
+      # extracted binary reports the stamped version.
+      - task: volt:smoke
+
+  clean:
+    desc: Remove build artifacts and coverage files
+    cmds:
+      - rm -rf {{.BIN_DIR}}
+      - find . -name cover.out -delete
