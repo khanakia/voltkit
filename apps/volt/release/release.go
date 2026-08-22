@@ -107,6 +107,14 @@ func Run(o Options) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	// Brew config rides the released directory's .volt.yml. Loaded HERE, not
+	// only in the command layer: with --from-tag the directory is resolved
+	// above, after flag parsing — a command-layer load sees an empty Dir and
+	// silently drops the channel (live incident: a republish skipped the
+	// formula push with no warning, 2026-08-22).
+	if o.Brew == (publish.BrewConfig{}) {
+		o.Brew = publish.BrewConfig(cfg.Brew)
+	}
 	if res.Kind == "" {
 		res.Kind, err = detect.Dir(absDir)
 		if err != nil {

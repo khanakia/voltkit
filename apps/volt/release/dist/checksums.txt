@@ -1,0 +1,1 @@
+4fde73b1d209aec66c12cd2294a06986435fb0f951561cf20314525bcc8c0f57  notes_v1.0.0_darwin_arm64.tar.gz

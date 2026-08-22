@@ -703,3 +703,43 @@ func TestChecksumsCoverSkillsBundle(t *testing.T) {
 		t.Fatalf("checksums.txt must include the skills bundle:\n%s", sums)
 	}
 }
+
+// --from-tag resolves the directory AFTER flag parsing, so brew config must
+// load inside Run from the resolved dir — a command-layer-only load silently
+// drops the formula push on every republish (live incident, 2026-08-22).
+func TestFromTagKeepsBrewChannel(t *testing.T) {
+	root := repo(t)
+	yml := filepath.Join(root, "cmd/notes/.volt.yml")
+	raw, err := os.ReadFile(yml)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(yml, append(raw, []byte("brew:\n  tap: khanakia/homebrew-tap\n  description: d\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "brew cfg")
+	pushed := ""
+	o := Options{
+		Root: root, Dir: "cmd/notes", Version: "v1.0.0", Publisher: newFakePub(),
+		PushFormula: func(tap, binary, formula, message string) error { pushed = tap; return nil },
+	}
+	if _, err := Run(o); err != nil {
+		t.Fatal(err)
+	}
+	if pushed != "khanakia/homebrew-tap" {
+		t.Fatalf("initial release must push the formula, got %q", pushed)
+	}
+	// The republish path: NO Brew in Options — must come from the dir's cfg.
+	pushed = ""
+	o2 := Options{
+		Root: root, FromTag: "notes/v1.0.0", Publisher: newFakePub(), SkipTests: true,
+		PushFormula: func(tap, binary, formula, message string) error { pushed = tap; return nil },
+	}
+	if _, err := Run(o2); err != nil {
+		t.Fatal(err)
+	}
+	if pushed != "khanakia/homebrew-tap" {
+		t.Fatalf("--from-tag republish must keep the brew channel, got %q", pushed)
+	}
+}
