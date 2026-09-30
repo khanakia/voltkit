@@ -5,7 +5,9 @@
 
 # --- build output ---
 /bin/
-/dist/
+# at any depth: a test that forgets a temp DistDir writes ./dist beside its
+# package, and that output was committed once (apps/volt/release/dist)
+dist/
 /tmp/
 # `go build` inside a module dir drops a binary named after that dir
 apps/cli/cli
