@@ -3,14 +3,18 @@
 #
 # Usage:
 #   curl -fsSL [[.RawScriptURL]] | sh
-#   VERSION=v1.2.0 curl -fsSL ... | sh        # pin a version
-#   INSTALL_DIR=~/.local/bin curl -fsSL ... | sh   # no sudo needed
+#   curl -fsSL [[.RawScriptURL]] | VERSION=v1.2.0 sh               # pin a version
+#   curl -fsSL [[.RawScriptURL]] | INSTALL_DIR=$HOME/.local/bin sh  # no sudo needed
 set -eu
 
 REPO="[[.Repo]]"
 BINARY="[[.Binary]]"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 VERSION="${VERSION:-}"
+# The release-tag prefix of this CLI's stream: empty when the CLI is the repo
+# root (tags v1.2.0), "<binary>/" when it lives in a subdirectory (tags
+# <binary>/v1.2.0). A VERSION given with the prefix is accepted too.
+TAG_PREFIX="[[.TagPrefix]]"
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -24,32 +28,52 @@ case "$OS" in
   *) echo "Unsupported OS: $OS (use install.ps1 on Windows)" >&2; exit 1 ;;
 esac
 
-# /releases/latest/download/ is a redirect with NO rate limit; the JSON API
-# is limited to 60 anonymous requests/hour/IP and would 403 on shared IPs.
 if [ -n "$VERSION" ]; then
+  VERSION=${VERSION#"$TAG_PREFIX"}
+elif [ -n "$TAG_PREFIX" ]; then
+  # "latest" is repo-global: in a repo with several release streams it is
+  # whichever was published last, possibly one with no binaries. So list this
+  # stream's tags instead; git ls-remote has no API rate limit.
+  command -v git >/dev/null 2>&1 || { echo "git is needed to find the newest ${BINARY} release — or pass VERSION=vX.Y.Z" >&2; exit 1; }
+  VERSION=$(git ls-remote --tags --refs "[[.CloneURL]]" "${TAG_PREFIX}v*" 2>/dev/null \
+    | sed "s|.*refs/tags/${TAG_PREFIX}v||" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1 | sed 's/^/v/')
+  [ -n "$VERSION" ] || { echo "no ${TAG_PREFIX}v* release found in ${REPO} — pass VERSION=vX.Y.Z" >&2; exit 1; }
+fi
+
+if [ -n "$VERSION" ]; then
+  TAG="${TAG_PREFIX}${VERSION}"
   BASE="[[.DownloadBase]]"
 else
+  # /releases/latest/download/ is a redirect with NO rate limit; the JSON API
+  # is limited to 60 anonymous requests/hour/IP and would 403 on shared IPs.
   BASE="[[.LatestBase]]"
   # A forge with no latest-release redirect renders this empty — then a
   # version is required, loudly (FG-D4).
-  [ -z "${BASE}" ] && { echo "this forge has no 'latest' redirect — pass a version: install.sh vX.Y.Z" >&2; exit 1; }
-  VERSION="latest"
-fi
-# Asset names mirror volt's platform.AssetName — generated from the same
-# constants, so they cannot drift from what the build produced.
-ASSET="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
-if [ "$VERSION" = "latest" ]; then
-  # latest/download serves assets by exact name; we cannot know the version
-  # half of the name, so fetch checksums.txt first and read it from there.
-  ASSET=$(curl -fsSL "${BASE}/checksums.txt" | awk '{print $2}' | grep "_${OS}_${ARCH}\.tar\.gz$" | head -n1)
-  [ -n "$ASSET" ] || { echo "no ${OS}/${ARCH} asset in the latest release of ${REPO}" >&2; exit 1; }
+  [ -z "${BASE}" ] && { echo "this forge has no 'latest' redirect — pass a version: VERSION=vX.Y.Z" >&2; exit 1; }
+  TAG="latest"
 fi
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-echo "Downloading ${ASSET} from ${REPO} (${VERSION})..."
+curl -fsSL -o "${tmp}/checksums.txt" "${BASE}/checksums.txt" || {
+  echo "no release ${TAG} of ${BINARY} in ${REPO} (could not fetch ${BASE}/checksums.txt)" >&2; exit 1; }
+
+# Asset names mirror volt's platform.AssetName — generated from the same
+# constants, so they cannot drift from what the build produced. The asset is
+# read from checksums.txt, which lists exactly what the release holds, so a
+# platform the release does not build is reported as such rather than as a
+# failed download.
+if [ "$TAG" = "latest" ]; then
+  ASSET=$(awk '{print $2}' "${tmp}/checksums.txt" | grep "_${OS}_${ARCH}\.tar\.gz$" | head -n1)
+else
+  ASSET="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
+  awk '{print $2}' "${tmp}/checksums.txt" | grep -qx "$ASSET" || ASSET=""
+fi
+[ -n "$ASSET" ] || { echo "release ${TAG} of ${REPO} has no ${OS}/${ARCH} build of ${BINARY}" >&2; exit 1; }
+
+echo "Downloading ${ASSET} from ${REPO} (${TAG})..."
 curl -fsSL -o "${tmp}/${ASSET}" "${BASE}/${ASSET}"
-curl -fsSL -o "${tmp}/checksums.txt" "${BASE}/checksums.txt"
 
 # Verify BEFORE installing — never pipe an unverified binary into PATH.
 # sha256sum is coreutils; stock macOS ships only shasum — support both.
@@ -67,6 +91,7 @@ tar xzf "${tmp}/${ASSET}" -C "$tmp"
 if [ -x "${INSTALL_DIR}/${BINARY}" ]; then
   echo "Replacing $("${INSTALL_DIR}/${BINARY}" --version 2>/dev/null || echo "existing install")"
 fi
+mkdir -p "$INSTALL_DIR" 2>/dev/null || true
 if [ -w "$INSTALL_DIR" ]; then
   mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 elif command -v sudo >/dev/null 2>&1; then
@@ -74,7 +99,7 @@ elif command -v sudo >/dev/null 2>&1; then
 else
   echo "${INSTALL_DIR} is not writable and sudo is unavailable." >&2
   echo "Re-run with INSTALL_DIR set to a writable directory, e.g.:" >&2
-  echo "  INSTALL_DIR=\$HOME/.local/bin sh install.sh" >&2
+  echo "  curl -fsSL [[.RawScriptURL]] | INSTALL_DIR=\$HOME/.local/bin sh" >&2
   exit 1
 fi
 chmod +x "${INSTALL_DIR}/${BINARY}"

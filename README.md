@@ -22,6 +22,7 @@ brew install khanakia/tap/volt        # or: curl release archive, or task instal
 | `volt build <dir> --version vX.Y.Z` | cross-compile matrix → archives + `checksums.txt`; ldflags stamping verified in the produced binary |
 | `volt release <dir> <version>` | tests → reserve tag → build → publish → **verify the published artifact**; `--bump patch\|minor\|major`, `--snapshot` (publish nothing), `--from-tag` (CI/recovery, idempotent) |
 | `volt gen` | write workflow stubs + install scripts, hash-guarded: hand-edited files are refused with a diff, never clobbered |
+| `volt gen install <dir>` | install scripts (`install.sh`, `install.ps1`) for the CLI in `<dir>`, for a repo whose root is not a single CLI; they find the newest release of that CLI's own tag stream (`<binary>/vX.Y.Z`) instead of the repo-global "latest" |
 | `volt gen skills` | wire [`skillcmd`](./skillcmd) into a project: guarded wiring file + a one-time starter skill; releases then attach `skills_<version>.tar.gz` automatically |
 | `volt doctor` | is this repo releasable? tools, auth, remote, version-pin drift |
 | `volt update` | self-update from volt's own releases, checksum-verified |

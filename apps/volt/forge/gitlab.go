@@ -91,6 +91,11 @@ func (GitLab) RawFileURL(repo Repo, path string) string {
 	return fmt.Sprintf("https://gitlab.com/%s/-/raw/main/%s", repo, path)
 }
 
+// CloneURL implements Forge.
+func (GitLab) CloneURL(repo Repo) string {
+	return fmt.Sprintf("https://gitlab.com/%s.git", repo)
+}
+
 // CIFiles implements Forge — one .gitlab-ci.yml (FG-D2).
 func (GitLab) CIFiles() []genfiles.File { return genfiles.GitLabCI }
 

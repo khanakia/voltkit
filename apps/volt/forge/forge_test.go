@@ -201,6 +201,7 @@ func TestAuxiliaryURLShapes(t *testing.T) {
 		gh.ArchiveTarballURL("o/n", "abc123"):    "https://codeload.github.com/o/n/tar.gz/abc123",
 		gh.CloneURL("o/n"):                       "https://github.com/o/n.git",
 		GitLab{}.RawFileURL("o/n", "install.sh"): "https://gitlab.com/o/n/-/raw/main/install.sh",
+		GitLab{}.CloneURL("group/sub/n"):         "https://gitlab.com/group/sub/n.git",
 	} {
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)

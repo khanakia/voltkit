@@ -9,12 +9,26 @@ $Repo   = "[[.Repo]]"
 $Binary = "[[.Binary]]"
 $InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA $Binary }
 $Version    = if ($env:VERSION) { $env:VERSION } else { "" }
+# The release-tag prefix of this CLI's stream: empty for a root CLI (v1.2.0),
+# "<binary>/" for one in a subdirectory (<binary>/v1.2.0).
+$TagPrefix  = "[[.TagPrefix]]"
 
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
 
+if ($Version -and $TagPrefix -and $Version.StartsWith($TagPrefix)) { $Version = $Version.Substring($TagPrefix.Length) }
+if (-not $Version -and $TagPrefix) {
+  # "latest" is repo-global and may be another stream's release: list this
+  # stream's tags instead (git ls-remote has no API rate limit).
+  if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Write-Error "git is needed to find the newest $Binary release - or set `$env:VERSION"; exit 1 }
+  $Version = git ls-remote --tags --refs "[[.CloneURL]]" "${TagPrefix}v*" |
+    ForEach-Object { ($_ -split "refs/tags/$TagPrefix")[1] } |
+    Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+    Sort-Object { [version]($_.Substring(1)) } | Select-Object -Last 1
+  if (-not $Version) { Write-Error "no ${TagPrefix}v* release found in $Repo - set `$env:VERSION"; exit 1 }
+}
 # The redirect endpoint has no rate limit; the JSON API allows 60/hr/IP.
-if ($Version) { $base = "[[.DownloadBasePS]]" }
-else          { $base = "[[.LatestBase]]" }
+if ($Version) { $Tag = "$TagPrefix$Version"; $base = "[[.DownloadBasePS]]" }
+else          { $Tag = "latest"; $base = "[[.LatestBase]]" }
 if (-not $base) { Write-Error "this forge has no 'latest' redirect - pass a version"; exit 1 }
 
 $tmp = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName())
@@ -22,7 +36,7 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
   Invoke-WebRequest -Uri "$base/checksums.txt" -OutFile (Join-Path $tmp "checksums.txt")
   $line = Get-Content (Join-Path $tmp "checksums.txt") | Where-Object { $_ -match "_windows_$arch\.zip$" } | Select-Object -First 1
-  if (-not $line) { throw "no windows/$arch asset in this release of $Repo" }
+  if (-not $line) { throw "release $Tag of $Repo has no windows/$arch build of $Binary" }
   $sum, $asset = $line -split "\s+", 2
   $zip = Join-Path $tmp $asset
   Write-Host "Downloading $asset..."
