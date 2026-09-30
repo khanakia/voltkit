@@ -161,17 +161,7 @@ func buildOne(opts Options, cfg voltcfg.Config, vars buildmeta.Vars, p platform.
 		"GOOS="+p.OS,
 		"GOARCH="+p.Arch,
 	)
-	if cfg.CGO {
-		// cgo cross-compilation needs a C compiler per target; rendered from
-		// the toolchain templates. Pre-flight (missing toolchain, darwin
-		// target) is validated before we ever get here — see Preflight.
-		if cc, err := vars.Render(cfg.Toolchain.CC); err == nil && cc != "" {
-			env = append(env, "CC="+cc)
-		}
-		if cxx, err := vars.Render(cfg.Toolchain.CXX); err == nil && cxx != "" {
-			env = append(env, "CXX="+cxx)
-		}
-	}
+	env = append(env, cgoToolchainEnv(cfg, vars, p)...)
 
 	cmd := exec.Command("go", "build", "-trimpath", "-ldflags", ldflags, "-o", outPath, ".")
 	cmd.Dir = opts.Dir
@@ -217,6 +207,30 @@ type stamp struct {
 // flag string plus every -X stamp it applied (for verification). Symbols are
 // emitted in sorted order so the command line — and therefore the binary — is
 // reproducible across runs.
+// cgoToolchainEnv returns the CC/CXX assignments for building p with cgo,
+// rendered from the toolchain templates; nil when cgo is off.
+//
+// The native target gets none: the host's own compiler builds it, which is
+// what Preflight already promises ("native target: the host toolchain
+// suffices"). Applying the cross toolchain there broke the one build that
+// needed nothing — `zig cc -target {{.ZigTarget}}` rendered with an empty
+// triple on a darwin host, and zig rejected it — so a repo had to write a
+// conditional template to get its own platform built. Pre-flight (missing
+// toolchain, darwin target from another OS) has run before this.
+func cgoToolchainEnv(cfg voltcfg.Config, vars buildmeta.Vars, p platform.Platform) []string {
+	if !cfg.CGO || (p.OS == hostOS() && p.Arch == hostArch()) {
+		return nil
+	}
+	var env []string
+	if cc, err := vars.Render(cfg.Toolchain.CC); err == nil && cc != "" {
+		env = append(env, "CC="+cc)
+	}
+	if cxx, err := vars.Render(cfg.Toolchain.CXX); err == nil && cxx != "" {
+		env = append(env, "CXX="+cxx)
+	}
+	return env
+}
+
 func renderLDFlags(lf voltcfg.LDFlags, vars buildmeta.Vars) (string, []stamp, error) {
 	var flags []string
 	if lf.Strip != nil && *lf.Strip {

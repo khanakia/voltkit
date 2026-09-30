@@ -49,8 +49,13 @@ func TestNotesFallsBackWhenMissing(t *testing.T) {
 		if !strings.Contains(got, "Release `notes/v1.4.0`") {
 			t.Errorf("%s: fallback not used: %q", name, got)
 		}
-		if !strings.Contains(got, "CHANGELOG.md") {
-			t.Errorf("%s: fallback must link the changelog: %q", name, got)
+		// The exact link: a substring check passed while the URL was being
+		// wrapped inside a second one.
+		if want := "See [CHANGELOG.md](https://github.com/khanakia/notes/blob/main/CHANGELOG.md) for details."; !strings.Contains(got, want) {
+			t.Errorf("%s: fallback must link the changelog as %q: %q", name, want, got)
+		}
+		if strings.Count(got, "https://") != 1 {
+			t.Errorf("%s: the link must hold one URL: %q", name, got)
 		}
 	}
 }
