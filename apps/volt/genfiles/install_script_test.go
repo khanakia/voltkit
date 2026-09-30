@@ -78,7 +78,11 @@ func (fx installFixture) publish(t *testing.T, tag string, withAsset bool) {
 	if !withAsset {
 		asset = fmt.Sprintf("notes_%s_plan9_mips.tar.gz", version)
 	}
-	c := exec.Command("tar", "czf", filepath.Join(dir, asset), "notes")
+	// A companion program in the same archive, as extra_binaries packs it.
+	if err := os.WriteFile(filepath.Join(pkg, "notes-sync"), []byte("#!/bin/sh\necho sync "+tag+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("tar", "czf", filepath.Join(dir, asset), "notes", "notes-sync")
 	c.Dir = pkg
 	if out, err := c.CombinedOutput(); err != nil {
 		t.Fatalf("tar: %v\n%s", err, out)
@@ -94,13 +98,14 @@ func (fx installFixture) publish(t *testing.T, tag string, withAsset bool) {
 }
 
 // script generates install.sh for the fixture with the given tag prefix.
-func (fx installFixture) script(t *testing.T, prefix string) string {
+func (fx installFixture) script(t *testing.T, prefix string, extras ...string) string {
 	t.Helper()
 	root := t.TempDir()
 	vars := Vars{
 		Repo: "o/n", Binary: "notes", Version: "v0.1.0",
 		DownloadBase: "file://" + fx.rel + "/${TAG}", LatestBase: "",
 		RawScriptURL: "https://example.invalid/install.sh", TagPrefix: prefix, CloneURL: fx.repo,
+		ExtraBinaries: extras,
 	}
 	if _, err := Generate(root, InstallScripts[0], vars, false); err != nil {
 		t.Fatal(err)
@@ -211,5 +216,39 @@ func TestInstallHeaderNamesItsRegenerateCommand(t *testing.T) {
 	raw, _ = os.ReadFile(filepath.Join(root, "install.sh"))
 	if !strings.Contains(string(raw), "# Regenerate:  volt gen\n") {
 		t.Errorf("default header changed:\n%s", string(raw)[:300])
+	}
+}
+
+// TestInstallShInstallsCompanionBinaries pins extra_binaries on the install
+// side: the programs shipped beside the main binary land beside it, runnable,
+// and one the release does not carry is named and skipped rather than failing
+// an install of a release cut before the companion existed.
+func TestInstallShInstallsCompanionBinaries(t *testing.T) {
+	fx := newInstallFixture(t)
+	dest, out, err := fx.install(t, fx.script(t, "notes/", "notes-sync", "notes-absent"), "VERSION=v0.2.0")
+	if err != nil {
+		t.Fatalf("install: %v\n%s", err, out)
+	}
+	if got := installed(t, dest); got != "notes notes/v0.2.0" {
+		t.Errorf("main binary = %q", got)
+	}
+	sync, err := exec.Command(filepath.Join(dest, "notes-sync")).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(sync)) != "sync notes/v0.2.0" {
+		t.Errorf("companion not installed or not runnable: %v %q\n%s", err, sync, out)
+	}
+	if !strings.Contains(out, "NOTE: notes-absent is not in release notes/v0.2.0; skipped.") {
+		t.Errorf("a companion the release lacks must be named:\n%s", out)
+	}
+	if !strings.Contains(out, "Installed notes notes-sync to ") {
+		t.Errorf("the summary must list what was installed:\n%s", out)
+	}
+	// With no companions configured, none are installed even if the archive
+	// happens to hold one.
+	dest, _, err = fx.install(t, fx.script(t, "notes/"), "VERSION=v0.2.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "notes-sync")); err == nil {
+		t.Error("an unconfigured companion was installed")
 	}
 }

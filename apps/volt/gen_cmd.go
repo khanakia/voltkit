@@ -75,6 +75,7 @@ overwrites. Files volt never touches: CHANGELOG.md, README.md, .volt.yml.
 				rootIsCLI = true
 			}
 			v := forgeVars(f, forge.Repo(repo), cfg.Binary)
+			v.ExtraBinaries = extraBinaryNames(".", cfg)
 			refused, err := writeGenerated(cmd, append(append([]genfiles.File{}, f.CIFiles()...), genfiles.InstallScripts...), v, rootIsCLI, force)
 			if err != nil {
 				return err
@@ -117,6 +118,21 @@ func writeGenerated(cmd *cobra.Command, files []genfiles.File, v genfiles.Vars, 
 	return refused, nil
 }
 
+// extraBinaryNames resolves .volt.yml's extra_binaries, given relative to the
+// released directory, to the names the build gives them: each directory's own
+// base name, exactly as gobuild names the archive entries.
+func extraBinaryNames(dir string, cfg voltcfg.Config) []string {
+	var names []string
+	for _, rel := range cfg.ExtraBinaries {
+		abs, err := filepath.Abs(filepath.Join(dir, rel))
+		if err != nil {
+			continue
+		}
+		names = append(names, filepath.Base(abs))
+	}
+	return names
+}
+
 // genInstall implements `volt gen install <dir>`: the install scripts for the
 // CLI in dir, written at the repo root. The scripts carry that CLI's tag
 // prefix (rule one, via relname.Compose — the same composer release uses), so
@@ -145,6 +161,7 @@ func genInstall(cmd *cobra.Command, f forge.Forge, repo, dir string, force bool)
 	}
 	v := forgeVars(f, forge.Repo(repo), cfg.Binary)
 	v.TagPrefix = prefix
+	v.ExtraBinaries = extraBinaryNames(dir, cfg)
 	v.Regenerate = "volt gen install " + filepath.ToSlash(rel)
 	refused, err := writeGenerated(cmd, genfiles.InstallScripts, v, true, force)
 	if err != nil {

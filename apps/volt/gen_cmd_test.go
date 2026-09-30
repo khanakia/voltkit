@@ -77,6 +77,8 @@ func TestGenInstallForSubdirCLI(t *testing.T) {
 		"go.mod":                   "module example.com/m\n\ngo 1.22\n",
 		"lib.go":                   "package m\n",
 		"cmd/notes/main.go":        "package main\n\nfunc main() {}\n",
+		"cmd/notes/.volt.yml":      "extra_binaries: [../notes-sync]\n",
+		"cmd/notes-sync/main.go":   "package main\n\nfunc main() {}\n",
 		"pkg/textutil/textutil.go": "package textutil\n",
 	}
 	for p, body := range files {
@@ -111,6 +113,7 @@ func TestGenInstallForSubdirCLI(t *testing.T) {
 	for _, want := range []string{
 		`TAG_PREFIX="notes/"`,
 		`BINARY="notes"`,
+		`EXTRA_BINARIES="notes-sync"`,
 		"https://github.com/o/n.git",
 		"https://github.com/o/n/releases/download/${TAG}",
 		"# Regenerate:  volt gen install cmd/notes\n",
@@ -120,7 +123,7 @@ func TestGenInstallForSubdirCLI(t *testing.T) {
 		}
 	}
 	ps, err := os.ReadFile(filepath.Join(root, "install.ps1"))
-	if err != nil || !strings.Contains(string(ps), `$TagPrefix  = "notes/"`) {
+	if err != nil || !strings.Contains(string(ps), `$TagPrefix  = "notes/"`) || !strings.Contains(string(ps), `"notes-sync" -split " "`) {
 		t.Errorf("install.ps1 = %v, lacks the tag prefix", err)
 	}
 	// Regenerating unchanged is quiet and allowed.

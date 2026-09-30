@@ -34,6 +34,14 @@ type Config struct {
 	// ExtraFiles are shipped inside each archive next to the binary
 	// (README, LICENSE). Paths are relative to the released directory.
 	ExtraFiles []string `yaml:"extra_files"`
+	// ExtraBinaries are other `package main` directories, relative to the
+	// released directory, built for every platform and shipped in the SAME
+	// archive as the main binary, each named after its directory. For a
+	// tool with companion programs it needs on PATH (plugins, helpers):
+	// one download and one install give a set that cannot be mismatched.
+	// They take the main binary's build settings; only the main binary's
+	// version stamp is verified, since a helper need not carry the symbol.
+	ExtraBinaries []string `yaml:"extra_binaries"`
 
 	LDFlags LDFlags `yaml:"ldflags"`
 

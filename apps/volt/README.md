@@ -38,6 +38,8 @@ None required. An optional `.volt.yml` beside the built directory overrides what
 binary: mycli                        # default: the directory name; also the CLI tag prefix (mycli/vX.Y.Z)
 platforms: [darwin/arm64, darwin/amd64, linux/amd64, linux/arm64, windows/amd64]
 extra_files: [README.md, LICENSE]    # shipped inside each release archive
+extra_binaries: [../mycli-plugin]    # other `package main` dirs built and packed into the SAME archive,
+                                     #   each named after its directory; install scripts install them too
 
 ldflags:
   strip: true                        # -s -w (default true; set false for debug symbols)
