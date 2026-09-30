@@ -15,6 +15,7 @@ volt release --from-tag notes/v1.4.0     # (re)publish an existing tag — CI / 
                                          # releases are the command above, or Run workflow with a tag
 volt release ./cmd/notes --snapshot      # build everything, publish nothing
 volt gen                                 # workflow stubs + install scripts, hash-guarded
+volt gen install ./cmd/notes             # install scripts for one CLI of a multi-binary repo (its own tag stream)
 volt gen skills                          # skillcmd wiring + one-time starter skill (see voltkit/skillcmd)
 volt doctor                              # is this repo releasable? (tools, auth, remote, pins)
 volt cover --badge coverage.svg          # coverage + self-contained README badge (--check for CI)

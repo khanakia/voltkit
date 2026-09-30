@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -29,18 +28,21 @@ var (
 func newGenCommand() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "gen [skills]",
+		Use:   "gen [skills | install <dir>]",
 		Short: "Write generated files: workflow stubs, install scripts — or the skills wiring",
 		Long: `Every file carries a "DO NOT EDIT" header with a body hash. Regeneration
 refuses to overwrite a hand-edited file (and prints the diff); --force
 overwrites. Files volt never touches: CHANGELOG.md, README.md, .volt.yml.
 
-  volt gen           the standard set: workflow stubs + install scripts
-  volt gen skills    the skillcmd wiring file, plus a one-time starter skill
-                     when skills/ does not exist yet (SKILLCMD_SPEC)`,
-		Args: cobra.MaximumNArgs(1),
+  volt gen                the standard set: workflow stubs + install scripts
+  volt gen skills         the skillcmd wiring file, plus a one-time starter skill
+                          when skills/ does not exist yet (SKILLCMD_SPEC)
+  volt gen install <dir>  install.sh + install.ps1 at the repo root for the CLI
+                          in <dir> — for a repo whose root is not a single CLI
+                          (several binaries, or a library with a CLI beside it);
+                          the scripts resolve that CLI's own tag stream`,
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			out := cmd.OutOrStdout()
 			cfg, err := voltcfg.Load(".")
 			if err != nil {
 				return err
@@ -56,8 +58,14 @@ overwrites. Files volt never touches: CHANGELOG.md, README.md, .volt.yml.
 			if len(args) == 1 && args[0] == "skills" {
 				return genSkills(cmd, cfg, f, repo, force)
 			}
-			if len(args) == 1 {
-				return fmt.Errorf(`unknown gen target %q — only "skills" exists`, args[0])
+			if len(args) >= 1 && args[0] == "install" {
+				if len(args) != 2 {
+					return fmt.Errorf("volt gen install needs the CLI's directory, e.g. volt gen install ./cmd/notes")
+				}
+				return genInstall(cmd, f, repo, args[1], force)
+			}
+			if len(args) >= 1 {
+				return fmt.Errorf(`unknown gen target %q — "skills" and "install <dir>" exist`, args[0])
 			}
 			// Root kind decides whether the install scripts apply: they
 			// install THE binary of a single-CLI repo. A library root or a
@@ -67,28 +75,9 @@ overwrites. Files volt never touches: CHANGELOG.md, README.md, .volt.yml.
 				rootIsCLI = true
 			}
 			v := forgeVars(f, forge.Repo(repo), cfg.Binary)
-			refused := 0
-			// The forge decides WHICH CI files exist (FG-D2); install
-			// scripts are forge-shared with forge-shaped URLs inside.
-			files := append(append([]genfiles.File{}, f.CIFiles()...), genfiles.InstallScripts...)
-			for _, gf := range files {
-				if gf.CLIOnly && !rootIsCLI {
-					_, _ = fmt.Fprintf(out, "skipped %s — repo root is not a single CLI (install scripts need one binary to install)\n", gf.RelPath)
-					continue
-				}
-				res, err := genfiles.Generate(".", gf, v, force)
-				if err != nil {
-					return err
-				}
-				switch res.Outcome {
-				case genfiles.Written:
-					_, _ = fmt.Fprintf(out, "wrote %s\n", gf.RelPath)
-				case genfiles.Unchanged:
-					_, _ = fmt.Fprintf(out, "unchanged %s\n", gf.RelPath)
-				case genfiles.Refused:
-					refused++
-					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "REFUSED %s — hand-edited; --force to overwrite\n%s", gf.RelPath, res.Diff)
-				}
+			refused, err := writeGenerated(cmd, append(append([]genfiles.File{}, f.CIFiles()...), genfiles.InstallScripts...), v, rootIsCLI, force)
+			if err != nil {
+				return err
 			}
 			if refused > 0 {
 				return fmt.Errorf("%d file(s) refused — review the diffs above", refused)
@@ -98,6 +87,73 @@ overwrites. Files volt never touches: CHANGELOG.md, README.md, .volt.yml.
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite hand-edited generated files")
 	return cmd
+}
+
+// writeGenerated renders files through the hash guard and reports each
+// outcome; CLIOnly files are skipped, loudly, unless includeCLIOnly.
+// It returns how many files were refused as hand-edited.
+func writeGenerated(cmd *cobra.Command, files []genfiles.File, v genfiles.Vars, includeCLIOnly, force bool) (int, error) {
+	out := cmd.OutOrStdout()
+	refused := 0
+	for _, gf := range files {
+		if gf.CLIOnly && !includeCLIOnly {
+			_, _ = fmt.Fprintf(out, "skipped %s — repo root is not a single CLI (install scripts need one binary to install); for a CLI in a subdirectory: volt gen install <dir>\n", gf.RelPath)
+			continue
+		}
+		res, err := genfiles.Generate(".", gf, v, force)
+		if err != nil {
+			return refused, err
+		}
+		switch res.Outcome {
+		case genfiles.Written:
+			_, _ = fmt.Fprintf(out, "wrote %s\n", gf.RelPath)
+		case genfiles.Unchanged:
+			_, _ = fmt.Fprintf(out, "unchanged %s\n", gf.RelPath)
+		case genfiles.Refused:
+			refused++
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "REFUSED %s — hand-edited; --force to overwrite\n%s", gf.RelPath, res.Diff)
+		}
+	}
+	return refused, nil
+}
+
+// genInstall implements `volt gen install <dir>`: the install scripts for the
+// CLI in dir, written at the repo root. The scripts carry that CLI's tag
+// prefix (rule one, via relname.Compose — the same composer release uses), so
+// they find its newest release in its own stream rather than trusting the
+// repo-global "latest", which in a multi-stream repo is whichever stream
+// released last.
+func genInstall(cmd *cobra.Command, f forge.Forge, repo, dir string, force bool) error {
+	kind, err := detect.Dir(dir)
+	if err != nil {
+		return err
+	}
+	if kind != detect.KindCLI {
+		return fmt.Errorf("%s is not a CLI (no package main): install scripts install a binary", dir)
+	}
+	cfg, err := voltcfg.Load(dir)
+	if err != nil {
+		return err
+	}
+	rel, err := repoRel(dir)
+	if err != nil {
+		return err
+	}
+	prefix, err := tagPrefixFor(kind, rel, cfg.Binary)
+	if err != nil {
+		return err
+	}
+	v := forgeVars(f, forge.Repo(repo), cfg.Binary)
+	v.TagPrefix = prefix
+	v.Regenerate = "volt gen install " + filepath.ToSlash(rel)
+	refused, err := writeGenerated(cmd, genfiles.InstallScripts, v, true, force)
+	if err != nil {
+		return err
+	}
+	if refused > 0 {
+		return fmt.Errorf("%d file(s) refused — review the diffs above", refused)
+	}
+	return nil
 }
 
 // genSkills implements `volt gen skills`: the guarded wiring file, the
@@ -165,23 +221,44 @@ wire it in (one of):
 // version, then stripping it. cwd at the repo root ⇒ "" (bare tags);
 // a CLI subdir ⇒ "<binary>/"; a library subdir ⇒ "<path>/".
 func tagPrefix(kind detect.Kind, binary string) (string, error) {
+	rel, err := repoRel(".")
+	if err != nil {
+		return "", err
+	}
+	return tagPrefixFor(kind, rel, binary)
+}
+
+// repoRel returns dir relative to the repository's top level.
+func repoRel(dir string) (string, error) {
 	top, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return "", fmt.Errorf("not inside a git repository: %w", err)
 	}
-	cwd, err := os.Getwd()
+	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return "", err
 	}
-	rel, err := filepath.Rel(strings.TrimSpace(string(top)), cwd)
-	if err != nil {
-		// Symlinked paths can defeat Rel; resolve both sides and retry.
-		rt, _ := filepath.EvalSymlinks(strings.TrimSpace(string(top)))
-		rc, _ := filepath.EvalSymlinks(cwd)
-		if rel, err = filepath.Rel(rt, rc); err != nil {
-			return "", err
-		}
+	root := strings.TrimSpace(string(top))
+	// Resolve symlinks on both sides: git reports the physical top level, and
+	// a path through a symlinked parent would otherwise leave the tree.
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
 	}
+	if a, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = a
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%s is outside the repository", dir)
+	}
+	return rel, nil
+}
+
+// tagPrefixFor is tagPrefix for a directory given relative to the repo root.
+func tagPrefixFor(kind detect.Kind, rel, binary string) (string, error) {
 	const probe = "v0.0.0" // any valid version; only the prefix survives
 	tag, err := relname.Compose(kind, rel, binary, probe)
 	if err != nil {

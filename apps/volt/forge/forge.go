@@ -82,6 +82,12 @@ type Forge interface {
 	// branch — install scripts print it as their own "curl | sh" hint.
 	RawFileURL(repo Repo, path string) string
 
+	// CloneURL is the anonymous https clone URL. An install script for a
+	// CLI with a prefixed tag stream (notes/v1.2.0) resolves its newest
+	// release with `git ls-remote` against it, because "latest" is
+	// repo-global and may be another stream's release.
+	CloneURL(repo Repo) string
+
 	// CIFiles is this forge's generated CI file set (FG-D2) — rendered by
 	// `volt gen` through the shared hash-guard engine in genfiles.
 	CIFiles() []genfiles.File
