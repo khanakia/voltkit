@@ -720,8 +720,13 @@ func TestFromTagKeepsBrewChannel(t *testing.T) {
 	mustGit(t, root, "add", ".")
 	mustGit(t, root, "commit", "-q", "-m", "brew cfg")
 	pushed := ""
+	// An explicit temp DistDir, for both runs: without one the build writes
+	// ./dist inside this package's source directory, and that output was
+	// once committed. Every `go test` then rewrote tracked files, left the
+	// tree dirty, and made the next `volt release` refuse.
+	dist := filepath.Join(t.TempDir(), "dist")
 	o := Options{
-		Root: root, Dir: "cmd/notes", Version: "v1.0.0", Publisher: newFakePub(),
+		Root: root, Dir: "cmd/notes", Version: "v1.0.0", Publisher: newFakePub(), DistDir: dist,
 		PushFormula: func(tap, binary, formula, message string) error { pushed = tap; return nil },
 	}
 	if _, err := Run(o); err != nil {
@@ -733,7 +738,7 @@ func TestFromTagKeepsBrewChannel(t *testing.T) {
 	// The republish path: NO Brew in Options — must come from the dir's cfg.
 	pushed = ""
 	o2 := Options{
-		Root: root, FromTag: "notes/v1.0.0", Publisher: newFakePub(), SkipTests: true,
+		Root: root, FromTag: "notes/v1.0.0", Publisher: newFakePub(), SkipTests: true, DistDir: dist,
 		PushFormula: func(tap, binary, formula, message string) error { pushed = tap; return nil },
 	}
 	if _, err := Run(o2); err != nil {
