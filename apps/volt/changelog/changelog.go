@@ -21,19 +21,24 @@ const FileName = "CHANGELOG.md"
 // pass "1.4.0" for tag v1.4.0). Resolution order:
 //
 //  1. the `## [1.4.0]` section of dir/CHANGELOG.md, if non-blank
-//  2. a generated one-liner naming the tag and linking the changelog
+//  2. a generated one-liner naming the tag and linking the changelog at
+//     changelogURL, the forge-built link to the file ("" omits the link)
 //
 // The blank check matters: a section heading followed only by whitespace must
 // fall through — a run of blank lines is not release notes (hit for real in
 // ubgo/buildinfo's awk version).
-func Notes(dir, tag, bareVersion, repo string) string {
+func Notes(dir, tag, bareVersion, changelogURL string) string {
 	if body := section(filepath.Join(dir, FileName), bareVersion); strings.TrimSpace(body) != "" {
 		return strings.TrimSpace(body) + "\n"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Release `%s`.\n", tag)
-	if repo != "" {
-		fmt.Fprintf(&b, "\nSee [CHANGELOG.md](https://github.com/%s/blob/main/%s) for details.\n", repo, FileName)
+	if changelogURL != "" {
+		// The URL arrives whole from the forge. Wrapping it in a GitHub URL
+		// here, as this once did, published every fallback note with
+		// https://github.com/https://github.com/o/n/blob/main/CHANGELOG.md/blob/main/CHANGELOG.md
+		// and named a forge outside the forge package.
+		fmt.Fprintf(&b, "\nSee [%s](%s) for details.\n", FileName, changelogURL)
 	}
 	return b.String()
 }
