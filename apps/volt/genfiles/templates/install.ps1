@@ -7,6 +7,8 @@ $ErrorActionPreference = "Stop"
 
 $Repo   = "[[.Repo]]"
 $Binary = "[[.Binary]]"
+# Companion programs shipped in the same archive and installed beside it.
+$ExtraBinaries = "[[.ExtraBinaries]]" -split " " | Where-Object { $_ }
 $InstallDir = if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA $Binary }
 $Version    = if ($env:VERSION) { $env:VERSION } else { "" }
 # The release-tag prefix of this CLI's stream: empty for a root CLI (v1.2.0),
@@ -49,6 +51,11 @@ try {
   Expand-Archive -Path $zip -DestinationPath $tmp -Force
   New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
   Copy-Item (Join-Path $tmp "$Binary.exe") (Join-Path $InstallDir "$Binary.exe") -Force
+  foreach ($extra in $ExtraBinaries) {
+    $src = Join-Path $tmp "$extra.exe"
+    if (Test-Path $src) { Copy-Item $src (Join-Path $InstallDir "$extra.exe") -Force }
+    else { Write-Host "NOTE: $extra is not in release $Tag; skipped." }
+  }
 
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
   if ($userPath -notlike "*$InstallDir*") {

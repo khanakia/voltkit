@@ -16,6 +16,7 @@ import (
 
 	"github.com/khanakia/voltkit/apps/volt/archive"
 	"github.com/khanakia/voltkit/apps/volt/buildmeta"
+	"github.com/khanakia/voltkit/apps/volt/detect"
 	"github.com/khanakia/voltkit/apps/volt/platform"
 	"github.com/khanakia/voltkit/apps/volt/voltcfg"
 )
@@ -151,8 +152,9 @@ func buildOne(opts Options, cfg voltcfg.Config, vars buildmeta.Vars, p platform.
 	}
 
 	binName := cfg.Binary + p.ExeSuffix()
-	outPath := filepath.Join(scratch, p.OS+"_"+p.Arch, binName)
-	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+	platDir := filepath.Join(scratch, p.OS+"_"+p.Arch)
+	outPath := filepath.Join(platDir, binName)
+	if err := os.MkdirAll(platDir, 0o755); err != nil {
 		return "", nil, err
 	}
 
@@ -163,11 +165,8 @@ func buildOne(opts Options, cfg voltcfg.Config, vars buildmeta.Vars, p platform.
 	)
 	env = append(env, cgoToolchainEnv(cfg, vars, p)...)
 
-	cmd := exec.Command("go", "build", "-trimpath", "-ldflags", ldflags, "-o", outPath, ".")
-	cmd.Dir = opts.Dir
-	cmd.Env = env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", nil, fmt.Errorf("go build: %s", strings.TrimSpace(string(out)))
+	if err := compile(opts.Dir, outPath, ldflags, env); err != nil {
+		return "", nil, err
 	}
 
 	// Verify the stamp landed, not just that the build was green: Go
@@ -176,6 +175,39 @@ func buildOne(opts Options, cfg voltcfg.Config, vars buildmeta.Vars, p platform.
 	warns := verifyStamps(outPath, stamps)
 
 	entries := []archive.Entry{{Name: binName, Path: outPath, Mode: 0o755}}
+	// Companion binaries ride in the same archive. Names must be unique:
+	// two entries with one name would leave whichever the archiver wrote
+	// last, silently.
+	seen := map[string]string{binName: "the main binary"}
+	for _, rel := range cfg.ExtraBinaries {
+		extraDir := filepath.Join(opts.Dir, rel)
+		// The name is the directory's own, resolved: "." and "../x/" name
+		// the directory they point at, not themselves.
+		abs, err := filepath.Abs(extraDir)
+		if err != nil {
+			return "", nil, fmt.Errorf("extra_binaries %s: %w", rel, err)
+		}
+		name := filepath.Base(abs) + p.ExeSuffix()
+		if prev, dup := seen[name]; dup {
+			return "", nil, fmt.Errorf("extra_binaries: %s would be named %s, which is already %s", rel, name, prev)
+		}
+		seen[name] = rel
+		// `go build -o` on a package that is not main succeeds and writes a
+		// package archive under the binary's name: asked of the toolchain
+		// rather than inferred from whether a file appeared.
+		kind, err := detect.Dir(extraDir)
+		if err != nil {
+			return "", nil, fmt.Errorf("extra_binaries %s: %w", rel, err)
+		}
+		if kind != detect.KindCLI {
+			return "", nil, fmt.Errorf("extra_binaries %s: not a program (package main)", rel)
+		}
+		out := filepath.Join(platDir, name)
+		if err := compile(extraDir, out, ldflags, env); err != nil {
+			return "", nil, fmt.Errorf("extra_binaries %s: %w", rel, err)
+		}
+		entries = append(entries, archive.Entry{Name: name, Path: out, Mode: 0o755})
+	}
 	for _, extra := range cfg.ExtraFiles {
 		entries = append(entries, archive.Entry{
 			Name: filepath.Base(extra),
@@ -195,6 +227,17 @@ func buildOne(opts Options, cfg voltcfg.Config, vars buildmeta.Vars, p platform.
 		return "", nil, err
 	}
 	return asset, warns, nil
+}
+
+// compile builds the package main in dir to outPath.
+func compile(dir, outPath, ldflags string, env []string) error {
+	cmd := exec.Command("go", "build", "-trimpath", "-ldflags", ldflags, "-o", outPath, ".")
+	cmd.Dir = dir
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("go build: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // stamp is one -X assignment, kept for post-build verification.

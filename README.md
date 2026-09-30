@@ -45,6 +45,7 @@ Works identically on a single-CLI repo, a library repo, a monorepo of CLIs, and 
 ```yaml
 binary: mycli                      # default: the directory name
 platforms: [darwin/arm64, linux/amd64, windows/amd64]
+extra_binaries: [../mycli-plugin]  # companion programs packed into the same archive and installed beside it
 ldflags:
   vars:                            # REPLACES the default stamp map
     main.version: "{{.Version}}"

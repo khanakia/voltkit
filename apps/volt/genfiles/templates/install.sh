@@ -9,6 +9,9 @@ set -eu
 
 REPO="[[.Repo]]"
 BINARY="[[.Binary]]"
+# Companion programs shipped in the same archive and installed beside
+# ${BINARY}; empty when there are none.
+EXTRA_BINARIES="[[.ExtraBinaries]]"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 VERSION="${VERSION:-}"
 # The release-tag prefix of this CLI's stream: empty when the CLI is the repo
@@ -93,19 +96,31 @@ if [ -x "${INSTALL_DIR}/${BINARY}" ]; then
 fi
 mkdir -p "$INSTALL_DIR" 2>/dev/null || true
 if [ -w "$INSTALL_DIR" ]; then
-  mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  MV="mv"
 elif command -v sudo >/dev/null 2>&1; then
-  sudo mv "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  MV="sudo mv"
 else
   echo "${INSTALL_DIR} is not writable and sudo is unavailable." >&2
   echo "Re-run with INSTALL_DIR set to a writable directory, e.g.:" >&2
   echo "  curl -fsSL [[.RawScriptURL]] | INSTALL_DIR=\$HOME/.local/bin sh" >&2
   exit 1
 fi
-chmod +x "${INSTALL_DIR}/${BINARY}"
+chmod +x "${tmp}/${BINARY}"
+$MV "${tmp}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+INSTALLED="${BINARY}"
+for extra in $EXTRA_BINARIES; do
+  # A release older than the companion may not carry it: say so, keep going.
+  if [ -f "${tmp}/${extra}" ]; then
+    chmod +x "${tmp}/${extra}"
+    $MV "${tmp}/${extra}" "${INSTALL_DIR}/${extra}"
+    INSTALLED="${INSTALLED} ${extra}"
+  else
+    echo "NOTE: ${extra} is not in release ${TAG}; skipped." >&2
+  fi
+done
 
 case ":$PATH:" in
   *":${INSTALL_DIR}:"*) ;;
   *) echo "NOTE: ${INSTALL_DIR} is not on your PATH." >&2 ;;
 esac
-echo "Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
+echo "Installed ${INSTALLED} to ${INSTALL_DIR}"

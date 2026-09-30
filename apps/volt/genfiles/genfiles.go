@@ -98,6 +98,10 @@ type Vars struct {
 	TagPrefix string
 	// CloneURL is the anonymous clone URL the script lists tags from.
 	CloneURL string
+	// ExtraBinaries are the companion programs shipped in the same archive
+	// as Binary (.volt.yml extra_binaries, by name); the scripts install
+	// them beside it.
+	ExtraBinaries []string
 	// Regenerate is the command recorded in the header as the way to
 	// regenerate the file; "" means "volt gen".
 	Regenerate string
@@ -242,6 +246,7 @@ func renderBytes(text string, v Vars, extras map[string]string) ([]byte, error) 
 		"LatestBase": v.LatestBase, "RawScriptURL": v.RawScriptURL,
 		"RawScriptURLPS": v.RawScriptURLPS,
 		"TagPrefix":      v.TagPrefix, "CloneURL": v.CloneURL,
+		"ExtraBinaries": strings.Join(v.ExtraBinaries, " "),
 	}
 	for k, val := range extras {
 		data[k] = val
